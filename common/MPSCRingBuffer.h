@@ -56,13 +56,11 @@ class MPSCRingBuffer {
         uint64_t size()
         {
                 uint64_t cur_head = 0, cur_tail = 0;
-                uint64_t ret = 0;
 
                 cur_head = head.load(std::memory_order_acquire);
-                cur_tail = (tail.load(std::memory_order_acquire)) % entry_num;
-                ret = (cur_tail - cur_head + entry_num) % entry_num;
+                cur_tail = tail.load(std::memory_order_acquire);
 
-                return ret;
+                return cur_tail - cur_head;
         }
 
         bool enqueue(char *data, uint64_t data_size)
@@ -103,6 +101,7 @@ class MPSCRingBuffer {
         uint64_t dequeue(char *data_buffer, uint64_t buffer_size)
         {
                 uint64_t cur_head = 0, cur_tail = 0;
+                uint64_t entry_index = 0;
                 uint64_t dequeue_size = 0;
                 Entry *entry = nullptr;
 
@@ -113,9 +112,10 @@ class MPSCRingBuffer {
                         return 0;
 
                 cur_head = head.load(std::memory_order_acquire);
+                entry_index = cur_head % entry_num;
 
                 /* get the entry */
-                entry = reinterpret_cast<Entry *>(entries_buffer.get() + cur_head * entry_struct_size);
+                entry = reinterpret_cast<Entry *>(entries_buffer.get() + entry_index * entry_struct_size);
 
                 /* wait for the entry to be ready */
                 while (entry->is_ready.load(std::memory_order_acquire) != 1);
@@ -143,7 +143,7 @@ class MPSCRingBuffer {
                         entry->is_ready.store(0, std::memory_order_relaxed);
 
                         /* increase head by 1 */
-                        head.store((cur_head + 1) % entry_num, std::memory_order_release);
+                        head.store(cur_head + 1, std::memory_order_release);
 
                         /* reduce count by 1 */
                         std::atomic_fetch_sub_explicit(&count, 1, std::memory_order_release);
